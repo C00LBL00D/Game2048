@@ -1,6 +1,15 @@
 # 2048 (Android)
 
+[![Release](https://img.shields.io/github/v/release/C00LBL00D/Game2048?label=%E6%9C%80%E6%96%B0%E7%89%88%E6%9C%AC)](https://github.com/C00LBL00D/Game2048/releases/latest)
+[![Release Build](https://github.com/C00LBL00D/Game2048/actions/workflows/release.yml/badge.svg)](https://github.com/C00LBL00D/Game2048/actions/workflows/release.yml)
+
 Kotlin + Jetpack Compose 写的 2048，带道具、每日签到和背景音乐。
+
+## 下载
+
+**[⬇ 下载最新版本 APK](https://github.com/C00LBL00D/Game2048/releases/latest)** —— 文件名为 `2048-v<版本号>.apk`，release 签名，Android 8.0 (minSdk 26) 以上。
+
+历史版本都在 [Releases](https://github.com/C00LBL00D/Game2048/releases) 页面；每个 `v*` tag 会触发 GitHub Actions 自动构建并把 APK 挂上去。
 
 ## 功能
 
