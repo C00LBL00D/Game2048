@@ -8,6 +8,19 @@
 - 提交信息用中文，格式 `type: 简短说明`（feat / fix / style / build）。
 - push 前跑一遍 `./gradlew test`。
 
+## 发版
+
+版本号改了、release 包出来之后：
+
+```bash
+git tag -a v<version> -m "2048 v<version>"
+git push origin v<version>
+gh release create v<version> app/build/outputs/apk/release/2048-v<version>.apk \
+  --title "2048 v<version>" --notes "..."
+```
+
+Release 里的 apk 是给用户直接下载的，别只 push 代码不留发版记录。
+
 ## 构建
 
 ```bash
