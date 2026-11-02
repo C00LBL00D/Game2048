@@ -181,8 +181,6 @@ fun Game2048Screen(prefs: SharedPreferences) {
     var armed by remember { mutableStateOf<Item?>(null) }
     var ghosts by remember { mutableStateOf<List<Game2048.Slide>>(emptyList()) }
     var mergeCells by remember { mutableStateOf<Set<Pair<Int, Int>>>(emptySet()) }
-    var followX by remember { mutableFloatStateOf(0f) }
-    var followY by remember { mutableFloatStateOf(0f) }
     var drag by remember { mutableStateOf(Offset.Zero) }
     var tipIndex by remember { mutableIntStateOf(0) }
     val today = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
@@ -492,42 +490,26 @@ fun Game2048Screen(prefs: SharedPreferences) {
                 onTileTap = { tapTile(it) },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .graphicsLayer {
-                        translationX = followX
-                        translationY = followY
-                    }
                     .pointerInput(Unit) {
                         val threshold = 22.dp.toPx()
-                        val maxFollow = 20.dp.toPx()
                         var fired = false
                         detectDragGestures(
                             onDragStart = {
                                 drag = Offset.Zero
                                 fired = false
-                                followX = 0f
-                                followY = 0f
                             },
                             onDragEnd = {
-                                followX = 0f
-                                followY = 0f
                                 if (!fired && maxOf(abs(drag.x), abs(drag.y)) > threshold) {
                                     fire(drag)
                                 }
                             },
-                            onDragCancel = {
-                                followX = 0f
-                                followY = 0f
-                            },
+                            onDragCancel = {},
                         ) { change, delta ->
                             change.consume()
                             drag += delta
-                            // 跟手：整块棋盘轻微跟随，最多 7dp，松手回弹
-                            followX = drag.x.coerceIn(-maxFollow, maxFollow) * 0.35f
-                            followY = drag.y.coerceIn(-maxFollow, maxFollow) * 0.35f
+                            // 越过阈值立刻出招，不需要等抬手；画面本身不做任何位移
                             if (!fired && maxOf(abs(drag.x), abs(drag.y)) > threshold) {
                                 fired = true
-                                followX = 0f
-                                followY = 0f
                                 fire(drag)
                             }
                         }
