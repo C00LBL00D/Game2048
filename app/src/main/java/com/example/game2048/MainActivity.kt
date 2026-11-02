@@ -1,9 +1,10 @@
 package com.example.game2048
 
 import android.content.SharedPreferences
+import android.media.AudioAttributes
 import android.media.AudioManager
 import android.media.MediaPlayer
-import android.media.ToneGenerator
+import android.media.SoundPool
 import android.os.Bundle
 import android.os.VibrationEffect
 import android.os.Vibrator
@@ -11,6 +12,8 @@ import android.widget.Toast
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.VectorConverter
+import androidx.compose.animation.core.animateTo
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
@@ -61,6 +64,7 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -86,6 +90,7 @@ import androidx.compose.material.icons.filled.Settings
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlin.math.abs
 import kotlin.math.roundToInt
 
@@ -175,6 +180,9 @@ fun Game2048Screen(prefs: SharedPreferences) {
     var gameOverDismissed by remember { mutableStateOf(false) }
     var armed by remember { mutableStateOf<Item?>(null) }
     var ghosts by remember { mutableStateOf<List<Game2048.Slide>>(emptyList()) }
+    var mergeCells by remember { mutableStateOf<Set<Pair<Int, Int>>>(emptySet()) }
+    var followX by remember { mutableFloatStateOf(0f) }
+    var followY by remember { mutableFloatStateOf(0f) }
     var drag by remember { mutableStateOf(Offset.Zero) }
     var tipIndex by remember { mutableIntStateOf(0) }
     val today = remember { SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date()) }
@@ -219,18 +227,33 @@ fun Game2048Screen(prefs: SharedPreferences) {
     }
     LaunchedEffect(musicVolume) { music?.setVolume(musicVolume, musicVolume) }
 
-    // ToneGenerator 没有 setVolume，音量只能在建的时候给，所以按 10% 一档重建
-    val toneStep = (sfxVolume * 10).roundToInt()
-    val tone = remember(toneStep) {
-        ToneGenerator(AudioManager.STREAM_MUSIC, (toneStep * 10).coerceIn(0, 100))
+    // 合成音效：按方块数值分 6 档，越高的方块音越高
+    val soundPool = remember {
+        SoundPool.Builder()
+            .setMaxStreams(4)
+            .setAudioAttributes(
+                AudioAttributes.Builder()
+                    .setUsage(AudioAttributes.USAGE_GAME)
+                    .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
+                    .build()
+            )
+            .build()
     }
-    DisposableEffect(tone) { onDispose { tone.release() } }
+    val mergeSounds = remember {
+        intArrayOf(
+            R.raw.sfx_merge_1, R.raw.sfx_merge_2, R.raw.sfx_merge_3,
+            R.raw.sfx_merge_4, R.raw.sfx_merge_5,
+        ).map { soundPool.load(context, it, 1) }
+    }
+    val winSound = remember { soundPool.load(context, R.raw.sfx_win, 1) }
+    DisposableEffect(Unit) { onDispose { soundPool.release() } }
     val gameOver = remember(tiles) { tiles.isNotEmpty() && !Game2048.canMove(tiles) }
 
     LaunchedEffect(ghosts) {
         if (ghosts.isNotEmpty()) {
             delay(SLIDE_MS.toLong() + 120)
             ghosts = emptyList()
+            mergeCells = emptySet()
         }
     }
 
@@ -238,7 +261,24 @@ fun Game2048Screen(prefs: SharedPreferences) {
         if (vibrateOn) {
             vibrator?.vibrate(VibrationEffect.createOneShot(millis, VibrationEffect.DEFAULT_AMPLITUDE))
         }
-        tone.startTone(ToneGenerator.TONE_PROP_BEEP, 45)
+    }
+
+    /** 合成音效：数值越大音越高，2048 以上用通关音 */
+    fun playMerge(value: Int) {
+        if (sfxVolume <= 0f) return
+        val sound = when {
+            value >= 2048 -> winSound
+            else -> mergeSounds[
+                when {
+                    value <= 8 -> 0
+                    value <= 32 -> 1
+                    value <= 128 -> 2
+                    value <= 512 -> 3
+                    else -> 4
+                }
+            ]
+        }
+        soundPool.play(sound, sfxVolume, sfxVolume, 1, 0, 1f)
     }
 
     fun saveBest(value: Int) {
@@ -287,10 +327,12 @@ fun Game2048Screen(prefs: SharedPreferences) {
         if (!result.changed) return
         pushHistory()
         ghosts = result.slides.filter { it.merged }
+        mergeCells = result.slides.filter { it.merged }.map { it.row to it.col }.toSet()
         tiles = Game2048.spawn(result.tiles)
         score += result.score
         moves++
         saveBest(score)
+        if (result.merges.isNotEmpty()) playMerge(result.merges.max())
         if (result.score > 0) feedback(12)
         result.created.filter { it >= 2048 }.maxOrNull()?.let {
             winTile = it
@@ -299,6 +341,15 @@ fun Game2048Screen(prefs: SharedPreferences) {
         result.created.forEach { value ->
             val summary = awardItems(Game2048.dropCount(value))
             Toast.makeText(context, "合成 $value！获得 $summary", Toast.LENGTH_SHORT).show()
+        }
+    }
+
+    /** 拖动方向 → 走一步 */
+    fun fire(delta: Offset) {
+        if (abs(delta.x) > abs(delta.y)) {
+            slide(if (delta.x > 0) Game2048.RIGHT else Game2048.LEFT)
+        } else {
+            slide(if (delta.y > 0) Game2048.DOWN else Game2048.UP)
         }
     }
 
@@ -437,24 +488,48 @@ fun Game2048Screen(prefs: SharedPreferences) {
             Board(
                 tiles = tiles,
                 ghosts = ghosts,
+                mergeCells = mergeCells,
                 onTileTap = { tapTile(it) },
                 modifier = Modifier
                     .fillMaxWidth()
+                    .graphicsLayer {
+                        translationX = followX
+                        translationY = followY
+                    }
                     .pointerInput(Unit) {
+                        val threshold = 22.dp.toPx()
+                        val maxFollow = 20.dp.toPx()
+                        var fired = false
                         detectDragGestures(
-                            onDragStart = { drag = Offset.Zero },
+                            onDragStart = {
+                                drag = Offset.Zero
+                                fired = false
+                                followX = 0f
+                                followY = 0f
+                            },
                             onDragEnd = {
-                                if (maxOf(abs(drag.x), abs(drag.y)) > 40f) {
-                                    if (abs(drag.x) > abs(drag.y)) {
-                                        slide(if (drag.x > 0) Game2048.RIGHT else Game2048.LEFT)
-                                    } else {
-                                        slide(if (drag.y > 0) Game2048.DOWN else Game2048.UP)
-                                    }
+                                followX = 0f
+                                followY = 0f
+                                if (!fired && maxOf(abs(drag.x), abs(drag.y)) > threshold) {
+                                    fire(drag)
                                 }
+                            },
+                            onDragCancel = {
+                                followX = 0f
+                                followY = 0f
                             },
                         ) { change, delta ->
                             change.consume()
                             drag += delta
+                            // 跟手：整块棋盘轻微跟随，最多 7dp，松手回弹
+                            followX = drag.x.coerceIn(-maxFollow, maxFollow) * 0.35f
+                            followY = drag.y.coerceIn(-maxFollow, maxFollow) * 0.35f
+                            if (!fired && maxOf(abs(drag.x), abs(drag.y)) > threshold) {
+                                fired = true
+                                followX = 0f
+                                followY = 0f
+                                fire(drag)
+                            }
                         }
                     },
             )
@@ -802,6 +877,7 @@ private fun Stat(label: String, value: String) {
 private fun Board(
     tiles: List<Game2048.Tile>,
     ghosts: List<Game2048.Slide>,
+    mergeCells: Set<Pair<Int, Int>>,
     onTileTap: (Game2048.Tile) -> Unit,
     modifier: Modifier,
 ) {
@@ -826,7 +902,15 @@ private fun Board(
         }
 
         tiles.forEach { tile ->
-            key(tile.id) { TileView(tile, cell, gap, onTap = { onTileTap(tile) }) }
+            key(tile.id) {
+                TileView(
+                    tile = tile,
+                    cell = cell,
+                    gap = gap,
+                    popDelayMs = if ((tile.row to tile.col) in mergeCells) SLIDE_MS.toLong() else 0L,
+                    onTap = { onTileTap(tile) },
+                )
+            }
         }
 
         ghosts.forEach { slide ->
@@ -836,19 +920,33 @@ private fun Board(
 }
 
 @Composable
-private fun TileView(tile: Game2048.Tile, cell: Dp, gap: Dp, onTap: () -> Unit) {
+private fun TileView(
+    tile: Game2048.Tile,
+    cell: Dp,
+    gap: Dp,
+    popDelayMs: Long,
+    onTap: () -> Unit,
+) {
     val x by animateDpAsState((cell + gap) * tile.col, tween(SLIDE_MS), label = "x")
     val y by animateDpAsState((cell + gap) * tile.row, tween(SLIDE_MS), label = "y")
-    val pop = remember { Animatable(0.6f) }
-    LaunchedEffect(tile.id) { pop.animateTo(1f, tween(140)) }
+    val pop = remember { Animatable(if (popDelayMs > 0) 0f else 0.6f) }
+    LaunchedEffect(tile.id) {
+        if (popDelayMs > 0) {
+            delay(popDelayMs)
+            pop.snapTo(0.6f)
+        }
+        pop.animateTo(1f, tween(140))
+    }
 
     Box(
         modifier = Modifier
             .offset(x, y)
             .size(cell)
             .graphicsLayer {
-                scaleX = pop.value
-                scaleY = pop.value
+                val scale = pop.value.coerceAtLeast(0.6f)
+                scaleX = scale
+                scaleY = scale
+                alpha = if (pop.value <= 0f) 0f else 1f
             }
             .background(tileColor(tile.value), RoundedCornerShape(8.dp))
             .clickable(onClick = onTap),

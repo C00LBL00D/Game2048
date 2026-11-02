@@ -218,4 +218,17 @@ class GameTest {
         println("SPAWN4 ratio=" + fours / 2000.0)
         assertTrue("4 的比例应在 15%~25%，实际 ${fours / 2000.0}", fours in 300..500)
     }
+
+    @Test
+    fun move_reportsMergedValuesForSound() {
+        val tiles = listOf(
+            Game2048.Tile(1, 2, 0, 0), Game2048.Tile(2, 2, 0, 1),
+            Game2048.Tile(3, 4, 0, 2), Game2048.Tile(4, 4, 0, 3),
+            Game2048.Tile(5, 8, 1, 0),
+        )
+        val result = Game2048.move(tiles, Game2048.LEFT)
+        assertEquals(listOf(4, 8), result.merges.sorted())
+        // 没合成的移动不给音效
+        assertTrue(Game2048.move(tiles.subList(0, 3), Game2048.UP).merges.isEmpty())
+    }
 }

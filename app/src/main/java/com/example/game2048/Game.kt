@@ -29,6 +29,8 @@ object Game2048 {
         val changed: Boolean,
         /** 这次合成出来的 >=2048 的数值，用来发道具奖励 */
         val created: List<Int>,
+        /** 这次所有合成出来的方块数值，用来挑音效 */
+        val merges: List<Int> = emptyList(),
     )
 
     fun newGame(random: Random = Random.Default): List<Tile> =
@@ -87,6 +89,7 @@ object Game2048 {
         var score = 0
         var changed = false
         val created = ArrayList<Int>()
+        val merges = ArrayList<Int>()
 
         for (line in lines(dir)) {
             val before = line.map { values[it] }
@@ -101,16 +104,17 @@ object Game2048 {
                 val parts = from.map { byCell[line[it]]!! }
                 parts.forEach { slides += Slide(it, row, col, merged = parts.size > 1) }
                 val value = after[outIdx]
+                if (parts.size > 1) merges += value
                 if (value >= 2048 && parts.size > 1) created += value
                 // 合出来的格子换新 id：UI 才会当成"新方块"弹一下；没合并的沿用旧 id 做位移
                 val id = if (parts.size == 1) parts[0].id else nextId++
                 out += Tile(id, value, row, col)
             }
         }
-        return MoveResult(out, slides, score, changed, created)
+        return MoveResult(out, slides, score, changed, created, merges)
     }
 
-    /** 随机空位放新块：90% 是 2，10% 是 4。没有空位返回原样。 */
+    /** 随机空位放新块：80% 是 2，20% 是 4。没有空位返回原样。 */
     fun spawn(tiles: List<Tile>, random: Random = Random.Default): List<Tile> {
         val occupied = tiles.mapTo(HashSet()) { it.cell }
         val free = (0 until N).filter { it !in occupied }
